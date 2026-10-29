@@ -36,6 +36,7 @@ function App() {
   const [goals, setGoals] = useState(() =>
     loadStoredData('learntrack-goals'),
   )
+  const [selectedGoal, setSelectedGoal] = useState(null)
 
   const [sessions, setSessions] = useState(() =>
     loadStoredData('learntrack-sessions'),
@@ -71,9 +72,29 @@ useEffect(() => {
   }, [sessions])
 
   function handleSaveGoal(newGoal) {
-    setGoals((currentGoals) => [...currentGoals, newGoal])
-    setShowGoalForm(false)
-    setSuccessMessage('Your learning goal has been created successfully.')
+  setGoals((currentGoals) => {
+    const goalExists = currentGoals.some(
+      (goal) => goal.id === newGoal.id,
+    )
+
+    return goalExists
+      ? currentGoals.map((goal) =>
+          goal.id === newGoal.id ? newGoal : goal,
+        )
+      : [...currentGoals, newGoal]
+  })
+
+  setSelectedGoal(newGoal)
+  setShowGoalForm(false)
+  setSuccessMessage(
+    newGoal.createdAt
+      ? 'Your learning goal has been saved successfully.'
+      : 'Your learning goal has been created successfully.',
+  )
+}
+
+  function handleViewGoal(goal) {
+    setSelectedGoal(goal)
   }
 
   function handleSaveSession(newSession) {
@@ -285,20 +306,87 @@ useEffect(() => {
                 }}
               />
             ) : activePage === 'Learning Goals' ? (
-              <LearningGoals
-                goals={goals}
-                onCreateGoal={openGoalForm}
-              />
+  selectedGoal ? (
+    <section className="content-card">
+      <button
+        className="button-secondary"
+        type="button"
+        onClick={() => setSelectedGoal(null)}
+      >
+        ← Back to learning goals
+      </button>
+
+      <h2>{selectedGoal.title}</h2>
+      <button
+  className="button-primary"
+  type="button"
+  onClick={() => setShowGoalForm(true)}
+>
+  Edit goal
+</button>
+
+
+      {selectedGoal.description ? (
+        <p>{selectedGoal.description}</p>
+      ) : (
+        <p className="muted-text">No description provided.</p>
+      )}
+
+      {selectedGoal.targetDate && (
+        <p>
+          <strong>Target date:</strong>{' '}
+          {new Date(
+            `${selectedGoal.targetDate}T00:00:00`,
+          ).toLocaleDateString()}
+        </p>
+      )}
+
+      <h3>Associated sessions</h3>
+
+      {sessions.filter(
+        (session) => session.goalId === selectedGoal.id,
+      ).length === 0 ? (
+        <p className="muted-text">
+          No sessions have been scheduled for this goal yet.
+        </p>
+      ) : (
+        <ul>
+          {sessions
+            .filter(
+              (session) => session.goalId === selectedGoal.id,
+            )
+            .map((session) => (
+              <li key={session.id}>
+                <strong>{session.title}</strong>
+                {' — '}
+                {new Date(session.startTime).toLocaleString()}
+                {' — '}
+                {session.status}
+              </li>
+            ))}
+        </ul>
+      )}
+    </section>
+  ) : (
+    <LearningGoals
+      goals={goals}
+      onCreateGoal={openGoalForm}
+      onViewGoal={handleViewGoal}
+    />
+  )
+
+
             ) : activePage === 'Session History' ? (
               <SessionHistory sessions={sessions} goals={goals} />
             ) : activePage === 'Settings' ? (
-              <PagePlaceholder page="Settings" />
+              <SettingsPage />
             ) : null}
 
             {showGoalForm && (
               <GoalForm
                 onClose={() => setShowGoalForm(false)}
                 onSave={handleSaveGoal}
+                goalToEdit={selectedGoal}
               />
             )}
 
@@ -573,7 +661,7 @@ function Dashboard({
   )
 }
 
-function LearningGoals({ goals, onCreateGoal }) {
+function LearningGoals({ goals, onCreateGoal, onViewGoal }) {
   return (
     <section className="content-card">
       <div className="section-heading">
@@ -605,12 +693,27 @@ function LearningGoals({ goals, onCreateGoal }) {
         <div className="goal-list">
           {goals.map((goal) => (
             <article className="goal-item" key={goal.id}>
-              <h3>{goal.title}</h3>
+  <h3>{goal.title}</h3>
 
-              {goal.description && <p>{goal.description}</p>}
+  {goal.description && <p>{goal.description}</p>}
 
-              <p className="muted-text">Learning goal</p>
-            </article>
+  {goal.targetDate && (
+    <p className="muted-text">
+      Target date: {new Date(`${goal.targetDate}T00:00:00`).toLocaleDateString()}
+    </p>
+  )}
+
+  <p className="muted-text">Learning goal</p>
+
+  <button
+    className="button-secondary"
+    type="button"
+    onClick={() => onViewGoal(goal)}
+  >
+    View goal
+  </button>
+</article>
+
           ))}
         </div>
       )}
@@ -619,14 +722,23 @@ function LearningGoals({ goals, onCreateGoal }) {
 }
 
 function SessionHistory({ sessions, goals }) {
-  const now = new Date()
+  const [selectedGoalId, setSelectedGoalId] = useState('all')
+  const [selectedStatus, setSelectedStatus] = useState('all')
 
-  const pastSessions = sessions.filter(
-    (session) =>
-      new Date(session.endTime) <= now ||
-      session.status === 'completed' ||
-      session.status === 'cancelled',
+  const sortedSessions = [...sessions].sort(
+    (a, b) => new Date(b.startTime) - new Date(a.startTime),
   )
+
+  const filteredSessions = sortedSessions.filter((session) => {
+    const matchesGoal =
+      selectedGoalId === 'all' || session.goalId === selectedGoalId
+
+    const status = getSessionStatus(session).toLowerCase()
+    const matchesStatus =
+      selectedStatus === 'all' || status === selectedStatus
+
+    return matchesGoal && matchesStatus
+  })
 
   return (
     <section className="content-card">
@@ -634,22 +746,69 @@ function SessionHistory({ sessions, goals }) {
         <h2>Session history</h2>
       </div>
 
-      {pastSessions.length === 0 ? (
+      <div className="history-filters">
+        <div className="form-field">
+          <label htmlFor="history-goal-filter">Learning goal</label>
+          <select
+            id="history-goal-filter"
+            value={selectedGoalId}
+            onChange={(event) => setSelectedGoalId(event.target.value)}
+          >
+            <option value="all">All goals</option>
+            {goals.map((goal) => (
+              <option key={goal.id} value={goal.id}>
+                {goal.title}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="form-field">
+          <label htmlFor="history-status-filter">Session status</label>
+          <select
+            id="history-status-filter"
+            value={selectedStatus}
+            onChange={(event) => setSelectedStatus(event.target.value)}
+          >
+            <option value="all">All statuses</option>
+            <option value="upcoming">Upcoming</option>
+            <option value="in progress">In progress</option>
+            <option value="overdue">Overdue</option>
+            <option value="completed">Completed</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+        </div>
+      </div>
+
+      {filteredSessions.length === 0 ? (
         <div className="empty-state">
           <div className="empty-state-icon" aria-hidden="true">
             ◷
           </div>
 
-          <h3>No past sessions</h3>
+          <h3>No sessions found</h3>
 
           <p>
-            Completed and cancelled sessions, along with sessions whose
-            scheduled end times have passed, will appear here.
+            No sessions match your selected filters. Try choosing a
+            different goal or status.
           </p>
+
+          {(selectedGoalId !== 'all' || selectedStatus !== 'all') && (
+            <button
+              className="button-secondary"
+              type="button"
+              onClick={() => {
+                setSelectedGoalId('all')
+                setSelectedStatus('all')
+              }}
+            >
+              Clear filters
+            </button>
+          )}
         </div>
       ) : (
         <div className="goal-list">
-          {pastSessions.map((session) => {
+          {filteredSessions.map((session) => {
             const goal = goals.find(
               (item) => item.id === session.goalId,
             )
@@ -668,6 +827,11 @@ function SessionHistory({ sessions, goals }) {
                   {formatDateTime(session.startTime)}
                 </p>
 
+                <p>
+                  <strong>Ends:</strong>{' '}
+                  {formatDateTime(session.endTime)}
+                </p>
+
                 <p className="muted-text">
                   {getSessionStatus(session)}
                 </p>
@@ -679,6 +843,7 @@ function SessionHistory({ sessions, goals }) {
     </section>
   )
 }
+
 
 function getSessionStatus(session) {
   if (session.status === 'completed') return 'Completed'
@@ -746,5 +911,207 @@ function PagePlaceholder({ page }) {
     </section>
   )
 }
+
+function SettingsPage() {
+  const [displayName, setDisplayName] = useState('Student')
+  const [email, setEmail] = useState('')
+  const [timeZone, setTimeZone] = useState(
+    Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+  )
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [message, setMessage] = useState('')
+
+  function handleProfileSubmit(event) {
+    event.preventDefault()
+    setMessage(
+      'Your profile settings are ready to connect to the backend.',
+    )
+  }
+
+  function handlePasswordSubmit(event) {
+    event.preventDefault()
+
+    if (newPassword.length < 12) {
+      setMessage('Your new password must contain at least 12 characters.')
+      return
+    }
+
+    if (newPassword !== confirmPassword) {
+      setMessage('The new passwords do not match.')
+      return
+    }
+
+    setMessage(
+      'Password changes require the backend connection. Your password has not been changed.',
+    )
+  }
+
+  return (
+    <div className="settings-page">
+      <section className="content-card">
+        <div className="section-heading">
+          <div>
+            <h2>Account settings</h2>
+            <p>Manage your LearnTrack profile and preferences.</p>
+          </div>
+        </div>
+
+        {message && (
+          <p className="success-message" role="status">
+            {message}
+          </p>
+        )}
+
+        <form onSubmit={handleProfileSubmit}>
+          <h3>Profile information</h3>
+
+          <div className="form-field">
+            <label htmlFor="settings-name">Display name</label>
+            <input
+              id="settings-name"
+              type="text"
+              value={displayName}
+              onChange={(event) => setDisplayName(event.target.value)}
+              maxLength={100}
+              required
+            />
+          </div>
+
+          <div className="form-field">
+            <label htmlFor="settings-email">Email address</label>
+            <input
+              id="settings-email"
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="student@example.com"
+            />
+          </div>
+
+          <div className="form-field">
+            <label htmlFor="settings-timezone">Time zone</label>
+            <select
+              id="settings-timezone"
+              value={timeZone}
+              onChange={(event) => setTimeZone(event.target.value)}
+            >
+              {[
+                'Africa/Lagos',
+                'Europe/London',
+                'America/New_York',
+                'America/Los_Angeles',
+                'Asia/Dubai',
+                'Asia/Kolkata',
+                'Asia/Tokyo',
+                'Australia/Sydney',
+                'UTC',
+              ].map((zone) => (
+                <option key={zone} value={zone}>
+                  {zone.replaceAll('_', ' ')}
+                </option>
+              ))}
+              {![
+                'Africa/Lagos',
+                'Europe/London',
+                'America/New_York',
+                'America/Los_Angeles',
+                'Asia/Dubai',
+                'Asia/Kolkata',
+                'Asia/Tokyo',
+                'Australia/Sydney',
+                'UTC',
+              ].includes(timeZone) && (
+                <option value={timeZone}>{timeZone}</option>
+              )}
+            </select>
+          </div>
+
+          <button className="button-primary" type="submit">
+            Save profile preferences
+          </button>
+        </form>
+      </section>
+
+      <section className="content-card">
+        <h2>Change password</h2>
+        <p className="muted-text">
+          Use a strong password containing at least 12 characters.
+        </p>
+
+        <form onSubmit={handlePasswordSubmit}>
+          <div className="form-field">
+            <label htmlFor="current-password">Current password</label>
+            <input
+              id="current-password"
+              type="password"
+              value={currentPassword}
+              onChange={(event) => setCurrentPassword(event.target.value)}
+              autoComplete="current-password"
+              required
+            />
+          </div>
+
+          <div className="form-field">
+            <label htmlFor="new-password">New password</label>
+            <input
+              id="new-password"
+              type="password"
+              onInvalid={(event) => event.preventDefault()}
+              value={newPassword}
+              onChange={(event) => setNewPassword(event.target.value)}
+              minLength={12}
+              autoComplete="new-password"
+              required
+            />
+          </div>
+
+          <div className="form-field">
+            <label htmlFor="confirm-password">
+              Confirm new password
+            </label>
+            <input
+              id="confirm-password"
+              type="password"
+              onInvalid={(event) => event.preventDefault()}
+              value={confirmPassword}
+              onChange={(event) =>
+                setConfirmPassword(event.target.value)
+              }
+              minLength={12}
+              autoComplete="new-password"
+              required
+            />
+          </div>
+
+          <button className="button-primary" type="submit">
+            Update password
+          </button>
+        </form>
+      </section>
+
+      <section className="content-card">
+        <h2>Sign out</h2>
+        <p>
+          Sign-out functionality will be connected to your authenticated
+          account when the backend integration is completed.
+        </p>
+        <button
+          className="button-secondary"
+          type="button"
+          onClick={() =>
+            setMessage(
+              'Sign-out will be available after authentication is connected.',
+            )
+          }
+        >
+          Sign out
+        </button>
+      </section>
+    </div>
+  )
+}
+
 
 export default App

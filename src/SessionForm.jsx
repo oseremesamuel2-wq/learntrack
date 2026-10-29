@@ -14,6 +14,75 @@ function toDateTimeLocalValue(value) {
     .slice(0, 16)
 }
 
+function getDateInTimeZone(dateTime, timeZone) {
+  const [datePart, timePart] = dateTime.split('T')
+  const [year, month, day] = datePart.split('-').map(Number)
+  const [hour, minute] = timePart.split(':').map(Number)
+
+  const desiredTime = Date.UTC(year, month - 1, day, hour, minute)
+  let timestamp = desiredTime
+
+  for (let i = 0; i < 3; i++) {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(new Date(timestamp))
+
+    const values = Object.fromEntries(
+      parts.map(({ type, value }) => [type, value]),
+    )
+
+    const representedTime = Date.UTC(
+      Number(values.year),
+      Number(values.month) - 1,
+      Number(values.day),
+      Number(values.hour),
+      Number(values.minute),
+    )
+
+    const difference = desiredTime - representedTime
+
+    if (difference === 0) break
+
+    timestamp += difference
+  }
+
+  const result = new Date(timestamp)
+
+  const formatted = new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).format(result)
+
+  const [resultDay, resultMonth, resultYear, resultHour, resultMinute] =
+    formatted.match(/\d+/g).map(Number)
+
+  if (
+    resultYear !== year ||
+    resultMonth !== month ||
+    resultDay !== day ||
+    resultHour !== hour ||
+    resultMinute !== minute
+  ) {
+    throw new Error(
+      'That start time is invalid in the selected time zone. Please choose another time.',
+    )
+  }
+
+  return result
+}
+
+
 
 function SessionForm({ goals, onClose, onSave, sessionToEdit = null, }) {
     const [goalId, setGoalId] = useState(
@@ -33,6 +102,17 @@ const [startTime, setStartTime] = useState(
 const [endTime, setEndTime] = useState(
   toDateTimeLocalValue(sessionToEdit?.endTime),
 )
+
+const [timeZone, setTimeZone] = useState(
+  sessionToEdit?.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone,
+)
+
+const [durationMinutes, setDurationMinutes] = useState(
+  sessionToEdit?.startTime && sessionToEdit?.endTime
+    ? (new Date(sessionToEdit.endTime) - new Date(sessionToEdit.startTime)) / 60000
+    : 60,
+)
+
 
   const [error, setError] = useState('')
   useEffect(() => {
@@ -65,13 +145,22 @@ const [endTime, setEndTime] = useState(
       return
     }
 
-    if (!startTime || !endTime) {
-      setError('Please select both a start time and an end time.')
+    if (!startTime || durationMinutes === '') {
+      setError('Please select a start time and enter a session duration.')
       return
     }
 
-    const start = new Date(startTime)
-    const end = new Date(endTime)
+    let start
+
+try {
+  start = getDateInTimeZone(startTime, timeZone)
+} catch (error) {
+  setError(error.message)
+  return
+}
+
+    const duration = Number(durationMinutes)
+    const end = new Date(start.getTime() + duration * 60000)
 
     if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
       setError('Please enter valid session dates and times.')
@@ -83,16 +172,17 @@ const [endTime, setEndTime] = useState(
       return
     }
 
-    if (end <= start) {
-      setError('The end time must be after the start time.')
-      return
-    }
-    const durationMinutes = (end.getTime() - start.getTime()) / 60000
-
-if (durationMinutes < 1 || durationMinutes > 1440) {
-  setError('Session duration must be between 1 minute and 24 hours.')
+if (
+  durationMinutes === '' ||
+  !Number.isInteger(duration) ||
+  duration < 1 ||
+  duration > 1440
+) {
+  setError('Session duration must be a whole number between 1 and 1440 minutes.')
   return
 }
+
+
 
 
     onSave({
@@ -100,6 +190,7 @@ if (durationMinutes < 1 || durationMinutes > 1440) {
   goalId,
   title: trimmedTitle,
   startTime: start.toISOString(),
+  timeZone,
   endTime: end.toISOString(),
   status: sessionToEdit ? 'scheduled' : 'scheduled',
   createdAt: sessionToEdit?.createdAt || new Date().toISOString(),
@@ -194,19 +285,54 @@ if (durationMinutes < 1 || durationMinutes > 1440) {
           </div>
 
           <div className="form-field">
-            <label htmlFor="session-end">End date and time</label>
+  <label htmlFor="session-time-zone">Time zone</label>
+  <select
+    id="session-time-zone"
+    value={timeZone}
+    onChange={(event) => {
+      setTimeZone(event.target.value)
+      setError('')
+    }}
+    required
+  >
+    {[...new Set([
+      timeZone,
+      'Africa/Lagos',
+      'Europe/London',
+      'America/New_York',
+      'America/Los_Angeles',
+      'Asia/Dubai',
+      'Asia/Kolkata',
+      'Asia/Tokyo',
+      'Australia/Sydney',
+      'UTC',
+    ])].map((zone) => (
+      <option key={zone} value={zone}>
+        {zone.replaceAll('_', ' ')}
+      </option>
+    ))}
+  </select>
+</div>
 
-            <input
-              id="session-end"
-              type="datetime-local"
-              value={endTime}
-              onChange={(event) => {
-                setEndTime(event.target.value)
-                setError('')
-              }}
-              required
-            />
-          </div>
+
+          <div className="form-field">
+  <label htmlFor="session-duration">Duration (minutes)</label>
+  <input
+    id="session-duration"
+    type="number"
+    min="1"
+    max="1440"
+    step="1"
+    value={durationMinutes}
+    onChange={(event) => {
+      setDurationMinutes(event.target.value)
+      setError('')
+    }}
+    required
+  />
+  <small>Enter a duration between 1 minute and 24 hours.</small>
+</div>
+
 
           {error && (
             <p className="form-error" role="alert">

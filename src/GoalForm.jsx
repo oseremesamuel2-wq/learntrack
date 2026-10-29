@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 
-function GoalForm({ onClose, onSave }) {
-  const [title, setTitle] = useState('')
+function GoalForm({ onClose, onSave, goalToEdit = null }) {
+  const [title, setTitle] = useState(goalToEdit?.title ?? '')
   const titleInputRef = useRef(null)
   useEffect(() => {
     titleInputRef.current?.focus()
   }, [])
-  const [description, setDescription] = useState('')
-  const [targetDate, setTargetDate] = useState('')
+  const [description, setDescription] = useState(goalToEdit?.description ?? '',)
+  const [targetDate, setTargetDate] = useState(goalToEdit?.targetDate ?? '',)
   const [error, setError] = useState('')
   useEffect(() => {
   function handleKeyDown(event) {
@@ -48,12 +48,13 @@ function GoalForm({ onClose, onSave }) {
 
 
     onSave({
-      id: crypto.randomUUID(),
-      title: trimmedTitle,
-      description: description.trim(),
-      targetDate: targetDate || null,
-      createdAt: new Date().toISOString(),
-    })
+  id: goalToEdit?.id ?? crypto.randomUUID(),
+  title: trimmedTitle,
+  description: description.trim(),
+  targetDate: targetDate || null,
+  createdAt: goalToEdit?.createdAt ?? new Date().toISOString(),
+})
+
   }
 
   return (
@@ -66,7 +67,7 @@ function GoalForm({ onClose, onSave }) {
       >
         <div className="modal-header">
           <div>
-            <h2 id="goal-form-heading">Create a learning goal</h2>
+            <h2 id="goal-form-heading">{goalToEdit ? 'Edit learning goal' : 'Create a learning goal'}</h2>
             <p>Define what you want to learn.</p>
           </div>
 
@@ -93,7 +94,7 @@ function GoalForm({ onClose, onSave }) {
                 setError('')
               }}
               placeholder="e.g. Learn React fundamentals"
-              maxLength={100}
+              maxLength={120}
               required
             />
           </div>
@@ -108,7 +109,7 @@ function GoalForm({ onClose, onSave }) {
               onChange={(event) => setDescription(event.target.value)}
               placeholder="What would you like to achieve?"
               rows={4}
-              maxLength={500}
+              maxLength={1000}
             />
           </div>
           <div className="form-field">
@@ -140,7 +141,7 @@ function GoalForm({ onClose, onSave }) {
             </button>
 
             <button className="button-primary" type="submit">
-              Save learning goal
+              {goalToEdit ? 'Update learning goal' : 'Save learning goal'}
             </button>
           </div>
         </form>
